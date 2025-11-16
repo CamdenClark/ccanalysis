@@ -1,0 +1,13 @@
+{
+  "name": "ccanalysis-dev",
+  "owner": {
+    "name": "CCAnalysis Development"
+  },
+  "plugins": [
+    {
+      "name": "ccanalysis-tracker",
+      "source": "./tracker",
+      "description": "Tracks Claude Code sessions including tool calls, user prompts, and agent lifecycle events"
+    }
+  ]
+}

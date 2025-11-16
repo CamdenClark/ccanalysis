@@ -1,0 +1,8 @@
+{
+  "name": "ccanalysis-tracker",
+  "description": "Tracks Claude Code sessions including tool calls, user prompts, and agent lifecycle events",
+  "version": "0.1.0",
+  "author": {
+    "name": "CCAnalysis"
+  }
+}

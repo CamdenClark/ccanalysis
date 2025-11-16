@@ -1,0 +1,26 @@
+{
+  "name": "@ccanalysis/cli",
+  "version": "0.1.0",
+  "description": "CLI tool for managing CCAnalysis database for Claude Code session tracking",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ccanalysis": "./index.ts"
+  },
+  "scripts": {
+    "init": "bun index.ts init",
+    "status": "bun index.ts status",
+    "sessions": "bun index.ts sessions"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "drizzle-kit": "^0.31.7",
+    "drizzle-orm": "^0.44.7"
+  }
+}
