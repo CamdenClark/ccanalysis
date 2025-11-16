@@ -4,21 +4,20 @@ A Claude Code plugin that automatically tracks session data including tool calls
 
 ## Overview
 
-This plugin is a **thin wrapper** that uses simple bash hooks to forward tracking events to the CCAnalysis CLI via `bunx`. All database logic and tracking implementation lives in the CLI.
+This plugin is a **thin wrapper** that uses hooks to forward tracking events to the CCAnalysis CLI via `bunx`. All database logic and tracking implementation lives in the CLI.
 
 The tracker captures data about your coding sessions and stores it in the CCAnalysis database (`~/.ccanalysis/data.sqlite`).
 
 ## Architecture
 
 The tracker plugin consists of:
-- **3 bash scripts** (preToolUse.sh, userPromptSubmit.sh, postToolUse.sh)
-- **1 config file** (hooks.json)
-- **No TypeScript, no dependencies** - just simple bash scripts calling the CLI
+- **1 config file** (`hooks/hooks.json`) - defines hooks that call the CLI
+- **No scripts, no TypeScript, no dependencies** - just CLI commands
 
-Each hook script:
-1. Reads JSON from stdin
-2. Forwards it to `bunx ccanalysis <command>` in the background
-3. Immediately returns a response (never blocks)
+Each hook:
+1. Receives JSON from Claude Code
+2. Calls `bunx ccanalysis <command>` with the data
+3. Times out after 5 seconds if needed
 
 ## Tracked Events
 
@@ -51,31 +50,7 @@ See the main [INSTALL.md](../INSTALL.md) for complete installation instructions.
 
 ## How It Works
 
-### 1. PreToolUse Hook (`preToolUse.sh`)
-```bash
-cat | bunx --bun ccanalysis track-tool-start > /dev/null 2>&1 &
-echo '{"decision":"allow"}'
-```
-- Forwards event to CLI in background
-- Always allows tools to proceed (non-blocking)
-
-### 2. UserPromptSubmit Hook (`userPromptSubmit.sh`)
-```bash
-cat | bunx --bun ccanalysis track-prompt > /dev/null 2>&1 &
-echo '{}'
-```
-- Forwards event to CLI in background
-- Never blocks user prompts
-
-### 3. PostToolUse Hook (`postToolUse.sh`)
-```bash
-cat | bunx --bun ccanalysis track-tool-end > /dev/null 2>&1 &
-echo '{}'
-```
-- Forwards event to CLI in background
-- Never blocks tool results
-
-## Hook Configuration
+### Hook Configuration
 
 Hooks are configured in `hooks/hooks.json`:
 
@@ -86,30 +61,55 @@ Hooks are configured in `hooks/hooks.json`:
       "matcher": ".*",
       "hooks": [{
         "type": "command",
-        "command": "${HOOK_DIR}/preToolUse.sh",
+        "command": "bunx --bun ccanalysis track-tool-start",
         "timeout": 5000
       }]
     }],
-    "UserPromptSubmit": [...],
-    "PostToolUse": [...]
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "bunx --bun ccanalysis track-prompt",
+        "timeout": 5000
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": ".*",
+      "hooks": [{
+        "type": "command",
+        "command": "bunx --bun ccanalysis track-tool-end",
+        "timeout": 5000
+      }]
+    }]
   }
 }
 ```
 
+### Hooks
+
+1. **PreToolUse**: Tracks when a tool is about to be called
+   - Command: `bunx --bun ccanalysis track-tool-start`
+   - Receives: `session_id`, `cwd`, `tool_name`, `tool_input`
+
+2. **UserPromptSubmit**: Tracks user input to Claude
+   - Command: `bunx --bun ccanalysis track-prompt`
+   - Receives: `session_id`, `cwd`, `user_prompt`
+
+3. **PostToolUse**: Tracks tool completion and results
+   - Command: `bunx --bun ccanalysis track-tool-end`
+   - Receives: `session_id`, `tool_name`, `tool_output`, `success`
+
 ## Performance
 
 The tracker is designed to be **extremely lightweight**:
-- Hooks are simple bash scripts (no compilation, no runtime overhead)
-- All processing happens in the background (non-blocking)
-- CLI operations run asynchronously via `&`
+- Hooks call CLI commands directly (no wrapper scripts)
 - 5-second timeout ensures hooks never hang
 - Errors in tracking never affect Claude Code functionality
+- All data processing happens in the CLI
 
 ## Troubleshooting
 
 ### Hooks not firing
 - Ensure plugin is properly installed in Claude Code
-- Verify hook scripts are executable: `ls -l hooks/*.sh`
 - Check CLI is linked: `bunx ccanalysis help`
 - Verify database is initialized: `bunx ccanalysis status`
 
@@ -129,29 +129,28 @@ bunx ccanalysis sessions  # List recent sessions
 
 ## Development
 
-### Testing Hooks Locally
+### Testing Hooks
 
-You can test hooks by piping JSON to them:
+The CLI commands accept JSON via stdin. You can test them directly:
 
 ```bash
-# Test preToolUse
-echo '{"session_id":"test-123","cwd":"/tmp","tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' | ./hooks/preToolUse.sh
+# Test track-tool-start
+echo '{"session_id":"test-123","cwd":"/tmp","tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' | bunx ccanalysis track-tool-start
 
-# Test userPromptSubmit
-echo '{"session_id":"test-123","cwd":"/tmp","user_prompt":"Hello Claude"}' | ./hooks/userPromptSubmit.sh
+# Test track-prompt
+echo '{"session_id":"test-123","cwd":"/tmp","user_prompt":"Hello Claude"}' | bunx ccanalysis track-prompt
 
-# Test postToolUse
-echo '{"session_id":"test-123","tool_name":"Read","tool_output":"file contents","success":true}' | ./hooks/postToolUse.sh
+# Test track-tool-end
+echo '{"session_id":"test-123","tool_name":"Read","tool_output":"file contents","success":true}' | bunx ccanalysis track-tool-end
 ```
 
-### Modifying Hooks
+### Modifying Tracking Behavior
 
-1. Edit bash scripts in `hooks/`
-2. Test locally using the commands above
-3. Reinstall plugin in Claude Code
-4. Restart Claude Code to pick up changes
+All tracking logic lives in the CLI (`../cli/index.ts`). To modify what gets tracked or how it's stored:
 
-**Note:** All tracking logic lives in the CLI. To modify tracking behavior, edit `../cli/index.ts` instead.
+1. Edit `../cli/index.ts`
+2. Test using the CLI commands above
+3. No need to reinstall the plugin - the hooks just call the CLI
 
 ## File Structure
 
@@ -160,14 +159,11 @@ tracker/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin metadata
 ├── hooks/
-│   ├── hooks.json           # Hook configuration
-│   ├── preToolUse.sh        # Pre-tool hook (bash)
-│   ├── userPromptSubmit.sh  # User prompt hook (bash)
-│   └── postToolUse.sh       # Post-tool hook (bash)
+│   └── hooks.json           # Hook configuration (calls CLI)
 └── README.md
 ```
 
-**No package.json, no tsconfig.json, no dependencies** - just simple bash scripts!
+**No package.json, no dependencies, no scripts** - just hook definitions!
 
 ## Privacy
 
